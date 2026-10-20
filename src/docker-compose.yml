@@ -1,0 +1,106 @@
+version: '3.8'
+
+services:
+  # Local Telegram API server - required for handling large files (>20 MB)
+  # Stores files in shared volume for bot to access
+  telegram-api:
+    image: aiogram/telegram-bot-api:latest
+    container_name: telegram-api
+    environment:
+      # From my.telegram.org - API development tools
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH}
+      # Local directory for storing uploaded files
+      TELEGRAM_LOCAL: "true"
+      # Allow accessing uploaded files directly from filesystem
+      TELEGRAM_ALLOW_USER_REGISTRATION: "true"
+    ports:
+      # Telegram API server port
+      - "${TELEGRAM_API_PORT:-8081}:8081"
+    volumes:
+      # Shared storage for uploaded/processed files
+      # Both services have read/write access
+      - shared_data:/var/lib/telegram-bot-api
+      - bot_files:/shared
+    # Run with specific user/group for permission management
+    # This ensures files can be accessed by telegram-audio-bot
+    user: "1000:1000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/test || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Audio conversion bot application
+  telegram-audio-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: telegram-audio-bot
+    depends_on:
+      telegram-api:
+        condition: service_healthy
+    environment:
+      # Bot credentials
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      # Point to local Telegram API instead of official servers
+      # Format: http://telegram-api:port (using Docker network hostname)
+      - TELEGRAM_API_BASE_URL=http://telegram-api:8081
+      # Application settings
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      # Directory where bot accesses files from Telegram API
+      - SHARED_DIRECTORY=/shared
+      # Temporary processing directory
+      - TEMP_FILES_PATH=/app/temp
+      # File size limits
+      - MAX_FILE_SIZE_MB=2048
+    ports:
+      # Bot API port
+      - "8080:8080"
+    volumes:
+      # Shared access to files uploaded to Telegram API
+      # Both services (user:1000, group:1000) have read/write access
+      - bot_files:/shared:rw
+      # Temporary files for processing
+      - bot_temp:/app/temp
+    # User/group defined in Dockerfile (appuser:1001 / group:tg-shared)
+    # Group 1000 (tg-shared) is shared with telegram-api for file access
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  # Shared storage for files between Telegram API and Bot
+  # Both services read/write to this location
+  # Files created with 770 permissions (rwxrwx---)
+  # Only members of group 1000 (tg-shared) can access
+  bot_files:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./shared_data
+
+  # Temporary data storage for Telegram API
+  shared_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./telegram_api_data
+
+  # Temporary processing files for bot
+  bot_temp:
+    driver: local
+
+networks:
+  default:
+    name: telegram-network
+    driver: bridge
