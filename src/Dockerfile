@@ -1,5 +1,5 @@
 # Build stage
-FROM mcr.microsoft.com/dotnet/sdk:10.0-jammy AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0-noble AS build
 WORKDIR /src
 
 # Copy project file
@@ -18,7 +18,7 @@ RUN dotnet build "TelegramAudioBot.csproj" -c Release -o /app/build
 RUN dotnet publish "TelegramAudioBot.csproj" -c Release -o /app/publish
 
 # Runtime stage
-FROM mcr.microsoft.com/dotnet/aspnet:10.0-jammy
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble
 
 # Install FFmpeg and create necessary groups/users
 RUN apt-get update && apt-get install -y \
