@@ -160,6 +160,29 @@ docker-compose up -d
 docker-compose logs -f telegram-audio-bot
 ```
 
+## CI/CD and published Docker image
+
+GitHub Actions validates pull requests by building the .NET solution and Docker
+image. Pushes to `main` and tags matching `v*` publish the image to GHCR. The
+`latest` tag tracks `main`; version tags (for example, `v1.2.3`) are published
+as-is. No registry secrets are required because the workflow uses
+`GITHUB_TOKEN`.
+
+After the first successful publish, make the package public in the repository
+owner's GitHub Packages settings if it is not already public. Then pull the
+image with:
+
+```bash
+docker pull ghcr.io/egotto/telegrambot.audioconverter:latest
+```
+
+To use it in `src/docker-compose.yml` instead of building from source, replace
+the bot service's `build` block with:
+
+```yaml
+image: ghcr.io/egotto/telegrambot.audioconverter:latest
+```
+
 ## API Endpoints
 
 ### Health Check
@@ -386,4 +409,3 @@ MIT
 - [ ] Web UI for management
 - [ ] Unit tests
 - [ ] Database integration for statistics
-
