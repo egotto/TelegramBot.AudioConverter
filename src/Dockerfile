@@ -28,7 +28,7 @@ RUN apt-get update && apt-get install -y \
 
 # Create a shared group for file access between services
 # Both telegram-api and telegram-audio-bot will use this group
-RUN groupadd -g 1000 tg-shared || true
+ RUN groupadd --non-unique --gid 1000 tg-shared
 
 # Create application user with shared group membership
 RUN useradd -m -u 1001 -g tg-shared -s /bin/bash appuser
