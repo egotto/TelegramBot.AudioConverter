@@ -216,8 +216,9 @@ public class UpdateProcessor(
 
             _logger.LogInformation("File path retrieved: {FilePath}", file.FilePath);
 
-            
-            var downloadPath = $"{_sharedDirectory}/{_botToken}/{file.FilePath}";
+            var downloadPath = Path.IsPathRooted(file.FilePath)
+                ? file.FilePath
+                : Path.Combine(_sharedDirectory, _botToken, file.FilePath);
             if (!Directory.Exists(Path.GetDirectoryName(downloadPath)) || !File.Exists(downloadPath))
             {
                 throw new FileNotFoundException($"File not found in shared directory: {downloadPath}");

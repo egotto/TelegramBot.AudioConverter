@@ -64,6 +64,8 @@ services:
       # Shared access to files uploaded to Telegram API
       # Both services (user:1000, group:1000) have read/write access
       - bot_files:/shared:rw
+      # Local Telegram Bot API returns absolute paths from this directory
+      - shared_data:/var/lib/telegram-bot-api:rw
       # Temporary files for processing
       - bot_temp:/app/temp
     # User/group defined in Dockerfile (appuser:1001 / group:tg-shared)
