@@ -28,7 +28,7 @@ builder.Services.AddSingleton<ITelegramBotClient>(_ => new TelegramBotClient(
     )));
 
 // Register application services
-builder.Services.AddHttpClient<IUpdateProcessor, UpdateProcessor>();
+builder.Services.AddScoped<IUpdateProcessor, UpdateProcessor>();
 builder.Services.AddScoped<IAudioExtractionService, AudioExtractionService>();
 builder.Services.AddScoped<ITelegramBotService, TelegramBotService>();
 builder.Services.AddScoped<IBotCommandService, BotCommandService>();
