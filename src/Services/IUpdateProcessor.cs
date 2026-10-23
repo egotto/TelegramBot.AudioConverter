@@ -25,6 +25,7 @@ public class UpdateProcessor(
     private readonly string _tempFilesPath = configuration["TEMP_FILES_PATH"] ?? Path.Combine(Path.GetTempPath(), "audio_processing");
     private readonly string _sharedDirectory = configuration["SHARED_DIRECTORY"] ?? throw new InvalidOperationException("SHARED_DIRECTORY not configured");
     private readonly string _botToken = configuration["TELEGRAM_BOT_TOKEN"] ?? throw new InvalidOperationException("TELEGRAM_BOT_TOKEN not configured");
+    private readonly long _maxFileSizeMb = configuration.GetValue<long>("MAX_FILE_SIZE_MB", 2048);
 
     public async Task ProcessUpdateAsync(Update update, CancellationToken cancellationToken)
     {
@@ -84,17 +85,15 @@ public class UpdateProcessor(
     {
         var chatId = message.Chat.Id;
 
-        // File size limit (using local Telegram API)
-        const long maxFileSizeGB = 2;
-        const long maxFileSizeBytes = maxFileSizeGB * 1024 * 1024 * 1024;
+        var maxFileSizeBytes = _maxFileSizeMb * 1024 * 1024;
 
         if (video.FileSize.HasValue && video.FileSize.Value > maxFileSizeBytes)
         {
             await _telegramService.SendMessageAsync(
                 chatId,
                 $"❌ Video file is too large for processing.\n\n" +
-                $"Limit: {maxFileSizeGB} GB\n" +
-                $"Your file size: {video.FileSize.Value / (1024 * 1024 * 1024)} GB",
+                $"Limit: {_maxFileSizeMb} MB\n" +
+                $"Your file size: {video.FileSize.Value / (1024 * 1024)} MB",
                 cancellationToken);
             return;
         }
@@ -123,7 +122,6 @@ public class UpdateProcessor(
             if (!success)
             {
                 await _telegramService.SendMessageAsync(chatId, "❌ Error extracting audio.", cancellationToken);
-                CleanupFiles(videoFilePath, audioFilePath);
                 return;
             }
 
@@ -149,7 +147,7 @@ public class UpdateProcessor(
         }
         finally
         {
-            CleanupFiles(videoFilePath, audioFilePath);
+            CleanupFiles(audioFilePath);
         }
     }
 
