@@ -1,0 +1,67 @@
+services:
+  telegram-api:
+    image: aiogram/telegram-bot-api:latest
+    container_name: telegram-api
+    env_file:
+      - .env
+    environment:
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID:?Set TELEGRAM_API_ID in .env}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:?Set TELEGRAM_API_HASH in .env}
+      TELEGRAM_LOCAL: ${TELEGRAM_LOCAL:-1}
+      TELEGRAM_STAT: ${TELEGRAM_STAT:-1}
+    ports:
+      - "${TELEGRAM_API_PORT:-8081}:8081"
+    volumes:
+      - type: bind
+        source: ./telegram_api_data
+        target: /var/lib/telegram-bot-api
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/test || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  telegram-audio-bot:
+    image: ghcr.io/egotto/telegrambot.audioconverter:latest
+    container_name: telegram-audio-bot
+    depends_on:
+      telegram-api:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?Set TELEGRAM_BOT_TOKEN in .env}
+      TELEGRAM_API_BASE_URL: ${TELEGRAM_API_BASE_URL:-http://telegram-api:8081}
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ASPNETCORE_URLS: ${ASPNETCORE_URLS:-http://+:8080}
+      SHARED_DIRECTORY: ${SHARED_DIRECTORY:-/var/lib/telegram-bot-api}
+      TEMP_FILES_PATH: ${TEMP_FILES_PATH:-/app/temp}
+      MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-2048}
+    ports:
+      - "8080:8080"
+    volumes:
+      - type: bind
+        source: ./telegram_api_data
+        target: /var/lib/telegram-bot-api
+        read_only: true
+      - bot_temp:/app/temp
+    group_add:
+      - "101"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  bot_temp:
+    driver: local
+
+networks:
+  default:
+    name: telegram-network
+    driver: bridge
