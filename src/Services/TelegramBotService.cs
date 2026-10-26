@@ -11,12 +11,12 @@ public interface ITelegramBotService
     /// <summary>
     /// Sends an audio file to a Telegram user
     /// </summary>
-    Task<Message?> SendAudioAsync(long chatId, Stream audioStream, string fileName, CancellationToken cancellationToken = default);
+    Task<Message?> SendAudioAsync(long chatId, Stream audioStream, string fileName, CancellationToken cancellationToken = default, long? userId = null);
 
     /// <summary>
     /// Sends a text message to a Telegram user
     /// </summary>
-    Task<Message?> SendMessageAsync(long chatId, string text, CancellationToken cancellationToken = default);
+    Task<Message?> SendMessageAsync(long chatId, string text, CancellationToken cancellationToken = default, long? userId = null);
 
     /// <summary>
     /// Gets the current bot info
@@ -26,9 +26,10 @@ public interface ITelegramBotService
 
 public class TelegramBotService(
     ITelegramBotClient _botClient, 
-    ILogger<TelegramBotService> _logger) : ITelegramBotService
+    ILogger<TelegramBotService> _logger,
+    IUserDataService _userDataService) : ITelegramBotService
 {
-    public async Task<Message?> SendAudioAsync(long chatId, Stream audioStream, string fileName, CancellationToken cancellationToken = default)
+    public async Task<Message?> SendAudioAsync(long chatId, Stream audioStream, string fileName, CancellationToken cancellationToken = default, long? userId = null)
     {
         try
         {
@@ -44,11 +45,19 @@ public class TelegramBotService(
         }
     }
 
-    public async Task<Message?> SendMessageAsync(long chatId, string text, CancellationToken cancellationToken = default)
+    public async Task<Message?> SendMessageAsync(long chatId, string text, CancellationToken cancellationToken = default, long? userId = null)
     {
         try
         {
             var message = await _botClient.SendMessage(chatId, text, cancellationToken: cancellationToken);
+            if (userId.HasValue)
+            {
+                await _userDataService.RecordEventAsync(
+                    userId.Value,
+                    "TextMessageSent",
+                    text,
+                    cancellationToken: cancellationToken);
+            }
             return message;
         }
         catch (Exception ex)

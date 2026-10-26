@@ -10,9 +10,10 @@ public interface IAudioExtractionService
     /// </summary>
     /// <param name="inputPath">Path to input video file</param>
     /// <param name="outputPath">Path to output audio file</param>
+    /// <param name="settings">Per-user audio conversion settings</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>True if extraction was successful</returns>
-    Task<bool> ExtractAudioAsync(string inputPath, string outputPath, CancellationToken cancellationToken = default);
+    Task<bool> ExtractAudioAsync(string inputPath, string outputPath, TelegramAudioBot.Models.UserSettings settings, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Gets information about a media file
