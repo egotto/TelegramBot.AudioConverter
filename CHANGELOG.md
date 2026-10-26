@@ -1,3 +1,9 @@
+## [0.2.2](https://github.com/egotto/TelegramBot.AudioConverter/compare/v0.2.1...v0.2.2) (2026-10-26)
+
+### Bug Fixes
+
+* Change trigger to workflow_run for Docker publish ([af14159](https://github.com/egotto/TelegramBot.AudioConverter/commit/af1415929bcd4b958aefb5f091eb380b04cdad21))
+
 ## [0.2.1](https://github.com/egotto/TelegramBot.AudioConverter/compare/v0.2.0...v0.2.1) (2026-10-26)
 
 ### Bug Fixes
