@@ -12,7 +12,7 @@ The simplest server deployment uses the root `docker-compose.yml` and `.env.exam
    nano .env
    ```
 
-3. Set `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, and `TELEGRAM_BOT_TOKEN`. Keep `TELEGRAM_API_BASE_URL=http://telegram-api:8081` for the default Compose network.
+3. Set `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_BOT_TOKEN`, and a strong `POSTGRES_PASSWORD`. Keep `TELEGRAM_API_BASE_URL=http://telegram-api:8081` for the default Compose network.
 4. Start the services from the directory containing both files:
 
    ```bash
@@ -28,7 +28,9 @@ The simplest server deployment uses the root `docker-compose.yml` and `.env.exam
 
 The bot health endpoint is `http://localhost:8080/api/health`. Telegram API status is available at `http://localhost:8081/test`.
 
-Compose stores Telegram API data in the sibling `telegram_api_data/` directory. It mounts this data read-write into `telegram-api` and read-only into the bot. The bot joins supplementary group `101` to read API-owned files (typically owner `101:101`, directories mode `750`, files mode `640`). Temporary MP3 output is kept in the `bot_temp` Docker volume and deleted after processing. Uploaded source videos remain managed by the Telegram API.
+Compose stores PostgreSQL data in the `postgres_data` Docker volume. The bot records user settings and message/file history in PostgreSQL. Managed copies of uploaded videos and generated audio are stored in the `bot_temp` Docker volume and removed after the configured retention period. Cleanup runs every four hours by default; `HistoryCleanup:IntervalHours` and `HistoryCleanup:RetentionDays` in `src/appsettings.json` control the schedule and retention (seven days by default).
+
+Compose stores Telegram API data in the sibling `telegram_api_data/` directory. It mounts this data read-write into `telegram-api` and read-only into the bot. The bot joins supplementary group `101` to read API-owned files (typically owner `101:101`, directories mode `750`, files mode `640`). Uploaded source videos remain managed by the Telegram API.
 
 If the API cannot write to its data directory, stop the services and correct the directory ownership from the Compose directory:
 
@@ -48,6 +50,7 @@ Required values:
 
 - `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` from [my.telegram.org](https://my.telegram.org)
 - `TELEGRAM_BOT_TOKEN` from [@BotFather](https://t.me/BotFather)
+- `POSTGRES_PASSWORD` for the database (choose a strong, unique value)
 
 `MAX_FILE_SIZE_MB` defaults to `2048`. `TELEGRAM_API_PORT` defaults to `8081`; the bot's HTTP health endpoint is published on port `8080`.
 

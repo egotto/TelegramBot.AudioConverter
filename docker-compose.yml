@@ -1,4 +1,20 @@
 services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: telegram-audio-bot-db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-telegram_audio_bot}
+      POSTGRES_USER: ${POSTGRES_USER:-telegram_audio_bot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-telegram_audio_bot} -d ${POSTGRES_DB:-telegram_audio_bot}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   telegram-api:
     image: aiogram/telegram-bot-api:latest
     container_name: telegram-api
@@ -27,6 +43,8 @@ services:
     image: ghcr.io/egotto/telegrambot.audioconverter:latest
     container_name: telegram-audio-bot
     depends_on:
+      postgres:
+        condition: service_healthy
       telegram-api:
         condition: service_healthy
     env_file:
@@ -39,6 +57,7 @@ services:
       SHARED_DIRECTORY: ${SHARED_DIRECTORY:-/var/lib/telegram-bot-api}
       TEMP_FILES_PATH: ${TEMP_FILES_PATH:-/app/temp}
       MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-2048}
+      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-telegram_audio_bot};Username=${POSTGRES_USER:-telegram_audio_bot};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
     ports:
       - "8080:8080"
     volumes:
@@ -58,6 +77,8 @@ services:
       start_period: 5s
 
 volumes:
+  postgres_data:
+    driver: local
   bot_temp:
     driver: local
 

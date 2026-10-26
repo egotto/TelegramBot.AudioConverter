@@ -4,10 +4,12 @@ namespace TelegramAudioBot.Services;
 
 public class AudioExtractionService(ILogger<AudioExtractionService> _logger) : IAudioExtractionService
 {
-    public async Task<bool> ExtractAudioAsync(string inputPath, string outputPath, CancellationToken cancellationToken = default)
+    public async Task<bool> ExtractAudioAsync(string inputPath, string outputPath, TelegramAudioBot.Models.UserSettings settings, CancellationToken cancellationToken = default)
     {
         try
         {
+            TelegramAudioBot.Models.AudioSettingsValidator.Validate(settings.AudioCodec, settings.AudioBitrateKbps, settings.AudioSampleRateHz);
+
             if (!File.Exists(inputPath))
             {
                 _logger.LogError("Input file not found: {FilePath}", inputPath);
@@ -22,7 +24,7 @@ public class AudioExtractionService(ILogger<AudioExtractionService> _logger) : I
 
             // Extract audio using FFMpeg command line
             // ffmpeg -i input.mp4 -q:a 0 -map a output.mp3
-            var arguments = $"-i \"{inputPath}\" -vn -acodec mp3 -ab 128k -ar 44100 \"{outputPath}\"";
+            var arguments = $"-i \"{inputPath}\" -vn -acodec {settings.AudioCodec} -ab {settings.AudioBitrateKbps}k -ar {settings.AudioSampleRateHz} \"{outputPath}\"";
 
             using (var process = new System.Diagnostics.Process())
             {

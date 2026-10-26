@@ -1,4 +1,5 @@
 using Telegram.Bot;
+using Microsoft.EntityFrameworkCore;
 using TelegramAudioBot.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -32,6 +33,16 @@ builder.Services.AddScoped<IUpdateProcessor, UpdateProcessor>();
 builder.Services.AddScoped<IAudioExtractionService, AudioExtractionService>();
 builder.Services.AddScoped<ITelegramBotService, TelegramBotService>();
 builder.Services.AddScoped<IBotCommandService, BotCommandService>();
+var databaseConnectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+if (string.IsNullOrWhiteSpace(databaseConnectionString))
+{
+    throw new InvalidOperationException("ConnectionStrings:DefaultConnection is not configured.");
+}
+
+builder.Services.AddDbContext<TelegramAudioBotDbContext>(options =>
+    options.UseNpgsql(databaseConnectionString));
+builder.Services.AddScoped<IUserDataService, UserDataService>();
+builder.Services.AddHostedService<HistoryCleanupHostedService>();
 
 // Polling service is Singleton, but it uses IServiceProvider to create scopes for Scoped services
 builder.Services.AddSingleton<IBotPollingService, BotPollingService>();
@@ -44,6 +55,12 @@ builder.Services.AddLogging(config =>
 });
 
 var app = builder.Build();
+
+using (var scope = app.Services.CreateScope())
+{
+    var dbContext = scope.ServiceProvider.GetRequiredService<TelegramAudioBotDbContext>();
+    await dbContext.Database.MigrateAsync();
+}
 
 // Configure the HTTP request pipeline
 if (app.Environment.IsDevelopment())

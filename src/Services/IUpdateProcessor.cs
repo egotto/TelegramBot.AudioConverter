@@ -20,6 +20,7 @@ public class UpdateProcessor(
     IAudioExtractionService _audioService,
     ITelegramBotService _telegramService,
     ILogger<UpdateProcessor> _logger,
+    IUserDataService _userDataService,
     IConfiguration configuration) : IUpdateProcessor
 {
     private readonly string _tempFilesPath = configuration["TEMP_FILES_PATH"] ?? Path.Combine(Path.GetTempPath(), "audio_processing");
@@ -34,32 +35,43 @@ public class UpdateProcessor(
             if (update.Message is not { } message)
                 return;
 
-            _logger.LogInformation("Received message from {UserId} in chat {ChatId}", message.From?.Id, message.Chat.Id);
+            if (message.From is not { } sender)
+                return;
+
+            var userId = sender.Id;
+            var messageType = GetMessageType(message);
+            await _userDataService.GetOrCreateSettingsAsync(userId, cancellationToken);
+            await _userDataService.RecordEventAsync(
+                userId,
+                $"{messageType}Received",
+                message.Text ?? message.Caption,
+                cancellationToken: cancellationToken);
+            _logger.LogInformation("Received message from {UserId} in chat {ChatId}", userId, message.Chat.Id);
 
             // Handle commands
             var commandText = message.Text?.Trim().Split(' ')[0].ToLower();
 
             if (commandText == CommandConstants.Start)
             {
-                await HandleStartCommand(message.Chat.Id, cancellationToken);
+                await HandleStartCommand(message.Chat.Id, userId, cancellationToken);
                 return;
             }
 
             if (commandText == CommandConstants.Help)
             {
-                await HandleHelpCommand(message.Chat.Id, cancellationToken);
+                await HandleHelpCommand(message.Chat.Id, userId, cancellationToken);
                 return;
             }
 
             if (commandText == CommandConstants.Settings)
             {
-                await HandleSettingsCommand(message.Chat.Id, cancellationToken);
+                await HandleSettingsCommand(message.Chat.Id, userId, cancellationToken);
                 return;
             }
 
             if (commandText == CommandConstants.Cancel)
             {
-                await HandleCancelCommand(message.Chat.Id, cancellationToken);
+                await HandleCancelCommand(message.Chat.Id, userId, cancellationToken);
                 return;
             }
 
@@ -69,11 +81,12 @@ public class UpdateProcessor(
                 await _telegramService.SendMessageAsync(
                     message.Chat.Id,
                     "❌ Please send a video file or enter /help command for help.",
-                    cancellationToken);
+                    cancellationToken,
+                    userId);
                 return;
             }
 
-            await ProcessVideoAsync(message, video, cancellationToken);
+            await ProcessVideoAsync(message, video, userId, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -81,7 +94,7 @@ public class UpdateProcessor(
         }
     }
 
-    private async Task ProcessVideoAsync(Message message, Video video, CancellationToken cancellationToken)
+    private async Task ProcessVideoAsync(Message message, Video video, long userId, CancellationToken cancellationToken)
     {
         var chatId = message.Chat.Id;
 
@@ -94,34 +107,44 @@ public class UpdateProcessor(
                 $"❌ Video file is too large for processing.\n\n" +
                 $"Limit: {_maxFileSizeMb} MB\n" +
                 $"Your file size: {video.FileSize.Value / (1024 * 1024)} MB",
-                cancellationToken);
+                cancellationToken,
+                userId);
             return;
         }
 
         await _telegramService.SendMessageAsync(
             chatId,
             "⏳ Processing video...",
-            cancellationToken);
+            cancellationToken,
+            userId);
 
         string videoFilePath = string.Empty;
         string audioFilePath = string.Empty;
+        var audioUploaded = false;
         try
         {
             // Create temp directory if needed
             if (!Directory.Exists(_tempFilesPath))
                 Directory.CreateDirectory(_tempFilesPath);
 
-            audioFilePath = Path.Combine(_tempFilesPath, $"audio_{message.MessageId}.mp3");
+            var sourceFilePath = await DownloadFileAsync(video.FileId, cancellationToken);
+            videoFilePath = await CopyToManagedStorageAsync(sourceFilePath, "video", Path.GetExtension(sourceFilePath), cancellationToken);
+            await _userDataService.RecordEventAsync(
+                userId,
+                "VideoDownloaded",
+                message.Caption,
+                Path.GetFileName(videoFilePath),
+                cancellationToken);
 
-            // Download video
-            videoFilePath = await DownloadFileAsync(video.FileId, cancellationToken);
             _logger.LogInformation("Video downloaded to {FilePath}", videoFilePath);
 
             // Extract audio
-            var success = await _audioService.ExtractAudioAsync(videoFilePath, audioFilePath, cancellationToken);
+            var settings = await _userDataService.GetOrCreateSettingsAsync(userId, cancellationToken);
+            audioFilePath = Path.Combine(_tempFilesPath, $"audio_{Guid.NewGuid():N}{settings.FileExtension}");
+            var success = await _audioService.ExtractAudioAsync(videoFilePath, audioFilePath, settings, cancellationToken);
             if (!success)
             {
-                await _telegramService.SendMessageAsync(chatId, "❌ Error extracting audio.", cancellationToken);
+                await _telegramService.SendMessageAsync(chatId, "❌ Error extracting audio.", cancellationToken, userId);
                 return;
             }
 
@@ -134,37 +157,48 @@ public class UpdateProcessor(
             var sentMessage = await _telegramService.SendAudioAsync(
                 chatId,
                 memoryStream,
-                $"audio_{message.MessageId}.mp3",
-                cancellationToken);
+                $"audio_{message.MessageId}{settings.FileExtension}",
+                cancellationToken,
+                userId);
 
             if (sentMessage != null)
-                await _telegramService.SendMessageAsync(chatId, "✅ Audio sent successfully!", cancellationToken);
+            {
+                await _userDataService.RecordEventAsync(
+                    userId,
+                    "AudioUploaded",
+                    Path.GetFileName(audioFilePath),
+                    Path.GetFileName(audioFilePath),
+                    cancellationToken: cancellationToken);
+                audioUploaded = true;
+                await _telegramService.SendMessageAsync(chatId, "✅ Audio sent successfully!", cancellationToken, userId);
+            }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing video");
-            await _telegramService.SendMessageAsync(chatId, "❌ An error occurred while processing video.", cancellationToken);
+            await _telegramService.SendMessageAsync(chatId, "❌ An error occurred while processing video.", cancellationToken, userId);
         }
         finally
         {
-            CleanupFiles(audioFilePath);
+            if (!audioUploaded)
+                CleanupFiles(audioFilePath);
         }
     }
 
-    private async Task HandleStartCommand(long chatId, CancellationToken cancellationToken)
+    private async Task HandleStartCommand(long chatId, long userId, CancellationToken cancellationToken)
     {
         var message = "👋 **Welcome to Audio Bot!**\n\n" +
             "I will help you extract audio from video in just a few seconds.\n\n" +
             "**How to use:**\n" +
             "1. Send me a video file (MP4, WebM, MOV, etc.)\n" +
-            "2. I will convert it to audio file (MP3 format)\n" +
+            "2. I will convert it to audio in your selected format\n" +
             "3. You will get the ready audio\n\n" +
             $"Use {CommandConstants.Help} for the list of commands.";
 
-        await _telegramService.SendMessageAsync(chatId, message, cancellationToken);
+        await _telegramService.SendMessageAsync(chatId, message, cancellationToken, userId);
     }
 
-    private async Task HandleHelpCommand(long chatId, CancellationToken cancellationToken)
+    private async Task HandleHelpCommand(long chatId, long userId, CancellationToken cancellationToken)
     {
         var helpMessage = "📋 **Available commands:**\n\n" +
             $"{CommandConstants.Start} - Start using\n" +
@@ -179,24 +213,25 @@ public class UpdateProcessor(
             "**Supported formats:**\n" +
             "MP4, WebM, MOV, AVI, FLV, MKV, etc.";
 
-        await _telegramService.SendMessageAsync(chatId, helpMessage, cancellationToken);
+        await _telegramService.SendMessageAsync(chatId, helpMessage, cancellationToken, userId);
     }
 
-    private async Task HandleSettingsCommand(long chatId, CancellationToken cancellationToken)
+    private async Task HandleSettingsCommand(long chatId, long userId, CancellationToken cancellationToken)
     {
+        var settings = await _userDataService.GetOrCreateSettingsAsync(userId, cancellationToken);
         var settingsMessage = "⚙️ **Current audio parameters:**\n\n" +
-            "🔊 Codec: MP3\n" +
-            "📊 Bitrate: 128 kbps\n" +
-            "🎵 Frequency: 44.1 kHz\n\n" +
+            $"🔊 Codec: {settings.AudioCodec.ToUpperInvariant()}\n" +
+            $"📊 Bitrate: {settings.AudioBitrateKbps} kbps\n" +
+            $"🎵 Frequency: {settings.AudioSampleRateHz / 1000.0:F1} kHz\n\n" +
             "💡 *These parameters are optimal for most applications and provide a good balance between quality and file size.*";
 
-        await _telegramService.SendMessageAsync(chatId, settingsMessage, cancellationToken);
+        await _telegramService.SendMessageAsync(chatId, settingsMessage, cancellationToken, userId);
     }
 
-    private async Task HandleCancelCommand(long chatId, CancellationToken cancellationToken)
+    private async Task HandleCancelCommand(long chatId, long userId, CancellationToken cancellationToken)
     {
         var message = "⏹️ Cancel current processing command.";
-        await _telegramService.SendMessageAsync(chatId, message, cancellationToken);
+        await _telegramService.SendMessageAsync(chatId, message, cancellationToken, userId);
     }
 
     private async Task<string> DownloadFileAsync(string fileId, CancellationToken cancellationToken)
@@ -245,5 +280,45 @@ public class UpdateProcessor(
                 _logger.LogWarning(ex, "Error deleting file {FilePath}", path);
             }
         }
+    }
+
+    private async Task<string> CopyToManagedStorageAsync(string sourcePath, string prefix, string extension, CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(_tempFilesPath);
+        var destinationPath = Path.Combine(_tempFilesPath, $"{prefix}_{Guid.NewGuid():N}{extension}");
+        try
+        {
+            await using var source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
+            await using var destination = new FileStream(destinationPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, useAsync: true);
+            await source.CopyToAsync(destination, cancellationToken);
+            return destinationPath;
+        }
+        catch
+        {
+            CleanupFiles(destinationPath);
+            throw;
+        }
+    }
+
+    private static string GetMessageType(Message message)
+    {
+        if (message.Text is not null)
+            return "TextMessage";
+        if (message.Video is not null)
+            return "VideoMessage";
+        if (message.Document is not null)
+            return "DocumentMessage";
+        if (message.Audio is not null)
+            return "AudioMessage";
+        if (message.Photo is not null)
+            return "PhotoMessage";
+        if (message.Voice is not null)
+            return "VoiceMessage";
+        if (message.VideoNote is not null)
+            return "VideoNoteMessage";
+        if (message.Sticker is not null)
+            return "StickerMessage";
+
+        return "OtherMessage";
     }
 }
