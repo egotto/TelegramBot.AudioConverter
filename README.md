@@ -77,16 +77,16 @@ The bot uses a **local Telegram API server** to handle large files (>20 MB) that
 │   Local Telegram API Server         │
 │   (Port 8081)                       │
 │   - Receives uploaded files         │
-│   - Stores in shared filesystem     │
+│   - Stores files in API data folder │
 └─────────────┬───────────────────────┘
               │ (File path references)
               ↓
 ┌─────────────────────────────────────┐
 │   Telegram Audio Bot                │
 │   (Port 8080)                       │
-│   - Reads video from shared storage │
+│   - Reads video from API data folder│
 │   - Extracts audio via FFmpeg       │
-│   - Saves MP3 to shared storage     │
+│   - Saves temporary MP3 in /app/temp│
 └─────────────┬───────────────────────┘
               │ (Audio file)
               ↓
@@ -96,7 +96,7 @@ The bot uses a **local Telegram API server** to handle large files (>20 MB) that
 └─────────────────────────────────────┘
 ```
 
-Both services access the same `/shared` volume for seamless file exchange.
+The bot reads uploaded videos from the Telegram API data directory through a read-only mount. Temporary MP3 files are stored in the bot's `/app/temp` volume.
 
 ## Quick Start (3 minutes)
 
@@ -142,23 +142,32 @@ dotnet run
 
 ## Docker Installation
 
+For the simplest deployment, copy `docker-compose.yml` and `.env.example` from
+the repository into the same directory on your server. You do not need to clone
+the source code or install .NET; Compose pulls the published bot image.
+
 ```bash
-# Clone the project
-git clone <repo-url>
-cd TelegramAudioBot
-
-# Create .env file
+# Run this from the directory containing docker-compose.yml and .env.example
 cp .env.example .env
-
-# Edit .env
 nano .env
 
-# Run Docker
-docker-compose up -d
+# Set TELEGRAM_API_ID, TELEGRAM_API_HASH, and TELEGRAM_BOT_TOKEN in .env
 
-# Check logs
-docker-compose logs -f telegram-audio-bot
+docker compose up -d
+
+# Check status and logs
+docker compose ps
+docker compose logs -f telegram-audio-bot
 ```
+
+Keep `.env` beside `docker-compose.yml`. Compose creates `telegram_api_data/`
+beside them for API-owned files; the bot mounts that directory read-only and
+uses supplementary group `101` to read uploaded videos. The bot stores and
+deletes only temporary MP3 files in its own volume.
+
+Docker Compose automatically reads `.env` from that directory for variable
+substitution. The Compose file passes only API credentials to `telegram-api`
+and the bot token and application settings to `telegram-audio-bot`.
 
 ## CI/CD and published Docker image
 
@@ -176,12 +185,10 @@ image with:
 docker pull ghcr.io/egotto/telegrambot.audioconverter:latest
 ```
 
-To use it in `src/docker-compose.yml` instead of building from source, replace
-the bot service's `build` block with:
+The root `docker-compose.yml` already uses this published image.
 
-```yaml
-image: ghcr.io/egotto/telegrambot.audioconverter:latest
-```
+To build from source, use the Dockerfile in `src/` and update the bot service in
+the root Compose file.
 
 ## API Endpoints
 
@@ -246,9 +253,9 @@ Environment variables (in `.env`):
 - `TELEGRAM_API_BASE_URL` - Local Telegram API URL, default http://telegram-api:8081
 - `ASPNETCORE_ENVIRONMENT` - Environment (Development/Production), default Production
 - `ASPNETCORE_URLS` - Application URL, default http://+:8080
-- `SHARED_DIRECTORY` - Shared directory for file exchange, default /shared
-- `TEMP_FILES_PATH` - Path for temporary files, default /tmp/audio_processing
-- `MAX_FILE_SIZE_MB` - Maximum file size in MB, default 2048 (for local API)
+- `SHARED_DIRECTORY` - Base directory used for relative API file paths, default `/var/lib/telegram-bot-api`
+- `TEMP_FILES_PATH` - Path for temporary audio files, default `/tmp/audio_processing` (Docker sets `/app/temp`)
+- `MAX_FILE_SIZE_MB` - Maximum video size in MB, default 2048
 - `TELEGRAM_API_PORT` - Local Telegram API port, default 8081
 
 ## Project Structure
@@ -277,10 +284,10 @@ TelegramAudioBot/
 │   ├── TelegramAudioBot.csproj        # C# project
 │   ├── TelegramAudioBot.sln           # Visual Studio solution
 │   ├── Dockerfile            # Multi-stage Docker image
-│   ├── docker-compose.yml    # Docker Compose configuration
 │   ├── Properties/           # Project properties
 │   └── TelegramAudioBot.http # HTTP tests
 ├── README.md             # Main documentation
+├── docker-compose.yml    # Root Docker Compose configuration
 ├── SETUP.md             # Installation guide
 ├── PERMISSIONS.md       # Security & permissions details
 ├── init-docker.sh       # Docker initialization script
@@ -290,35 +297,30 @@ TelegramAudioBot/
 
 ## Security & Permissions
 
-The application uses **group-based access control** for secure file sharing between services.
+The bot uses supplementary group `101` to read Telegram API files owned by UID/GID `101:101`. The API data is mounted read-write in the API container and read-only in the bot. Converted audio is written to the bot's temporary volume.
 
 ### User and Group Setup
 
 ```
-Service                User:UID  Groups
-─────────────────────────────────────────────────────
-telegram-api          root:0    root (0), tg-shared (1000)
-telegram-audio-bot    appuser:1001  tg-shared (1000) ← Primary
+Service                Access
+────────────────────────────────────────────────────────────
+telegram-api          Owns and writes /var/lib/telegram-bot-api
+telegram-audio-bot    UID from image + supplementary GID 101
 ```
 
 ### File Permissions Model
 
 ```
-/shared directory:
-  Permissions: 770 (rwxrwx---)
-  Owner:       root (0)
-  Group:       tg-shared (1000)
-  
-Files created:
-  Permissions: 660 (rw-rw----)
-  Access:      Only group 1000 members (both services)
-  Security:    No world-readable or world-writable
+API token directories: typically 750, owned by 101:101
+Uploaded files:       typically 640, owned by 101:101
+Bot API mount:        read-only, with supplementary group 101
+Bot temporary files:  /app/temp, removed after processing
 ```
 
 ### Benefits
 
 ✅ **Security**: Non-root bot process limits damage if compromised
-✅ **Access Control**: Only authorized services can read/write files
+✅ **Access Control**: The bot can read API files but cannot alter them
 ✅ **No Data Leaks**: Files not readable by other system processes
 ✅ **Restricted Permissions**: No world-writable directories
 
@@ -347,11 +349,12 @@ curl -X POST "http://localhost:8080/api/admin/webhook/remove"
 
 ### Run in Docker with Webhook
 ```bash
-# Create .env file
-echo "TELEGRAM_BOT_TOKEN=your_token" > .env
+# Create and configure the environment file
+cp .env.example .env
+nano .env
 
-# Run docker-compose
-docker-compose up -d
+# Start both services from the project root
+docker compose up -d
 
 # Setup webhook
 curl -X POST "https://yourdomain.com:8443/api/admin/webhook/setup?url=https://yourdomain.com:8443/api/webhook/update"
@@ -392,7 +395,7 @@ dotnet test
 - Bot token is stored in environment variables (not in code)
 - Temporary files are deleted after processing
 - Validation of incoming updates from Telegram
-- **Proper user and group permissions** for shared file access (see [PERMISSIONS.md](PERMISSIONS.md))
+- **Read-only group-based access** to Telegram API files (see [PERMISSIONS.md](PERMISSIONS.md))
 - Bot process runs as non-root user (appuser) with restricted privileges
 - Group-based access control for inter-service file exchange
 
