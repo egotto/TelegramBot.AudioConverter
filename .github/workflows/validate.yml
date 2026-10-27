@@ -2,6 +2,9 @@ name: Validate and build
 
 on:
   pull_request:
+    paths:
+      - 'src/**'
+      - '.github/workflows/validate.yml'
   workflow_dispatch:
 
 permissions:
