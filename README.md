@@ -1,3 +1,5 @@
+[![Validate and build](https://github.com/egotto/TelegramBot.AudioConverter/actions/workflows/validate.yml/badge.svg)](https://github.com/egotto/TelegramBot.AudioConverter/actions/workflows/validate.yml)
+
 # Telegram Audio Bot
 
 A bot for extracting audio from video files sent via Telegram.
