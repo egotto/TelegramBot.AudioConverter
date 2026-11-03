@@ -15,7 +15,12 @@ public sealed record YtDlpDownloadResult(
     IReadOnlyList<string> Errors,
     string? Error = null);
 
-public sealed record YtDlpProgress(double Percent, string Speed, string Eta);
+public sealed record YtDlpProgress(
+    double Percent,
+    string Speed,
+    string Eta,
+    int? PlaylistIndex,
+    int? PlaylistCount);
 
 public sealed class YtDlpOptions
 {

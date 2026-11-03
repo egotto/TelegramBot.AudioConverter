@@ -38,6 +38,16 @@ public class BotCommandService(
     {
         try
         {
+            await _botClient.SetMyDescription(
+                "Educational demo of Telegram bots with .NET. Only download content you are authorized to download, and follow platform terms and applicable laws.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error setting bot description");
+        }
+
+        try
+        {
             var commands = new BotCommand[]
             {
                 new() { Command = "start", Description = "Start using the bot" },

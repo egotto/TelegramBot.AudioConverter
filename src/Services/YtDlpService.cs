@@ -8,7 +8,7 @@ namespace TelegramAudioBot.Services;
 public sealed class YtDlpService : IYtDlpService, IDisposable
 {
     private static readonly Regex ProgressRegex = new(
-        @"(?<percent>\d+(?:\.\d+)?)%\|(?<speed>[^|]*)\|(?<eta>.*)",
+        @"(?<index>[^|]*)\|(?<count>[^|]*)\|(?<percent>\d+(?:\.\d+)?)%\|(?<speed>[^|]*)\|(?<eta>.*)",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private readonly YtDlpOptions _options;
@@ -80,11 +80,12 @@ public sealed class YtDlpService : IYtDlpService, IDisposable
             "--ignore-errors",
             "--no-abort-on-error",
             "--newline",
+            "--no-colors",
             "--progress",
-            "--progress-template", "download:%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s",
+            "--progress-template", "download:%(info.playlist_index)s|%(info.playlist_count)s|%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s",
             "--max-filesize", $"{maxFileSizeMb}M",
             "--paths", outputDirectory,
-            "--output", "%(autonumber)03d-%(id)s.%(ext)s",
+            "--output", "%(playlist_index)03d - %(title).150B [%(id)s].%(ext)s",
             "--print", "after_move:filepath"
         };
 
@@ -190,7 +191,14 @@ public sealed class YtDlpService : IYtDlpService, IDisposable
                     await progress(new YtDlpProgress(
                         percent,
                         match.Groups["speed"].Value.Trim(),
-                        match.Groups["eta"].Value.Trim()), cancellationToken);
+                        match.Groups["eta"].Value.Trim(),
+                        ParsePlaylistNumber(match.Groups["index"].Value),
+                        ParsePlaylistNumber(match.Groups["count"].Value)), cancellationToken);
+                    _logger.LogInformation(
+                        "yt-dlp progress: playlist item {PlaylistIndex}/{PlaylistCount}, {Percent}%",
+                        match.Groups["index"].Value,
+                        match.Groups["count"].Value,
+                        percent);
                     lastUpdate = DateTimeOffset.UtcNow;
                 }
             }
@@ -204,6 +212,11 @@ public sealed class YtDlpService : IYtDlpService, IDisposable
             }
         }
     }
+
+    private static int? ParsePlaylistNumber(string value) =>
+        int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var number)
+            ? number
+            : null;
 
     public void Dispose() => _downloadSemaphore.Dispose();
 }
