@@ -11,7 +11,7 @@ A bot for extracting audio from video files sent via Telegram.
 - ✅ **Long Polling by default** (ideal for personal use)
 - ✅ Optional Webhook support for production
 - ✅ Built-in bot commands
-- 📋 Planned: Support for downloading videos from links (YouTube)
+- ✅ Download audio from supported media links and playlists with yt-dlp
 
 ## Bot Commands
 
@@ -20,7 +20,7 @@ A bot for extracting audio from video files sent via Telegram.
 - `/settings` — Audio processing parameters
 - `/cancel` — Cancel current processing
 
-Simply send a video file to the bot, and it will automatically convert it to audio.
+Send a video file, a supported media link, or a playlist link. Available playlist tracks are processed independently; skipped items and errors are reported after processing.
 
 ## Long Polling vs Webhook
 
@@ -39,7 +39,7 @@ Simply send a video file to the bot, and it will automatically convert it to aud
 ## Requirements
 
 - .NET 10.0+
-- FFmpeg
+- FFmpeg, yt-dlp with its default dependencies, and Deno
 - Telegram Bot Token (from @BotFather)
 - **Local Telegram API** (for files > 20 MB) - API ID and Hash from [my.telegram.org](https://my.telegram.org)
 - Docker & Docker Compose (for containerized setup)
@@ -257,7 +257,12 @@ Environment variables (in `.env`):
 - `ASPNETCORE_URLS` - Application URL, default http://+:8080
 - `SHARED_DIRECTORY` - Base directory used for relative API file paths, default `/var/lib/telegram-bot-api`
 - `TEMP_FILES_PATH` - Path for temporary audio files, default `/tmp/audio_processing` (Docker sets `/app/temp`)
-- `MAX_FILE_SIZE_MB` - Maximum video size in MB, default 2048
+- `MAX_FILE_SIZE_MB` - Maximum source video or downloaded media size in MB, default 2048
+- `YT_DLP_MAX_CONCURRENT_DOWNLOADS` - Maximum simultaneous link downloads, default 2
+- `YT_DLP_MAX_PLAYLIST_ITEMS` - Maximum playlist items to download; `0` means unlimited
+- `YT_DLP_PROGRESS_UPDATE_INTERVAL_SECONDS` - Minimum time between progress updates, default 5
+- `YT_DLP_EXECUTABLE_PATH` - yt-dlp executable path, default `yt-dlp`
+- `YT_DLP_FFMPEG_LOCATION` - FFmpeg location passed to yt-dlp, default `/usr/bin`
 - `TELEGRAM_API_PORT` - Local Telegram API port, default 8081
 
 ## Project Structure

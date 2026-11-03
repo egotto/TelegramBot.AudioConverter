@@ -52,7 +52,7 @@ Required values:
 - `TELEGRAM_BOT_TOKEN` from [@BotFather](https://t.me/BotFather)
 - `POSTGRES_PASSWORD` for the database (choose a strong, unique value)
 
-`MAX_FILE_SIZE_MB` defaults to `2048`. `TELEGRAM_API_PORT` defaults to `8081`; the bot's HTTP health endpoint is published on port `8080`.
+`MAX_FILE_SIZE_MB` defaults to `2048`. Link downloads are limited to two concurrent yt-dlp processes by default; configure `YT_DLP_MAX_CONCURRENT_DOWNLOADS` and, optionally, `YT_DLP_MAX_PLAYLIST_ITEMS` in `.env`. A playlist item limit of `0` means unlimited. `TELEGRAM_API_PORT` defaults to `8081`; the bot's HTTP health endpoint is published on port `8080`.
 
 ## Troubleshooting File Access
 
@@ -68,7 +68,7 @@ The bot's `id` output should include group `101`, and the test should print `rea
 
 ## Run from Source
 
-For local development, install .NET 10 and FFmpeg, copy `.env.example` to `.env`, and set the required credentials. Then run:
+For local development, install .NET 10, FFmpeg, yt-dlp with its default dependencies, and Deno. Copy `.env.example` to `.env`, set the required credentials, and ensure `yt-dlp`, `deno`, and `ffmpeg` are available on `PATH`. Then run:
 
 ```bash
 cd src

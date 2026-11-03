@@ -57,6 +57,11 @@ services:
       SHARED_DIRECTORY: ${SHARED_DIRECTORY:-/var/lib/telegram-bot-api}
       TEMP_FILES_PATH: ${TEMP_FILES_PATH:-/app/temp}
       MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-2048}
+      YtDlp__ExecutablePath: ${YT_DLP_EXECUTABLE_PATH:-yt-dlp}
+      YtDlp__FfmpegLocation: ${YT_DLP_FFMPEG_LOCATION:-/usr/bin}
+      YtDlp__MaxConcurrentDownloads: ${YT_DLP_MAX_CONCURRENT_DOWNLOADS:-2}
+      YtDlp__MaxPlaylistItems: ${YT_DLP_MAX_PLAYLIST_ITEMS:-0}
+      YtDlp__ProgressUpdateIntervalSeconds: ${YT_DLP_PROGRESS_UPDATE_INTERVAL_SECONDS:-5}
       ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-telegram_audio_bot};Username=${POSTGRES_USER:-telegram_audio_bot};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
     ports:
       - "8080:8080"

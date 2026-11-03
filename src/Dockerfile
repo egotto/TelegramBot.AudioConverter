@@ -21,10 +21,20 @@ RUN dotnet publish "TelegramAudioBot.csproj" -c Release -o /app/publish
 FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble
 
 # Install FFmpeg and create necessary groups/users
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
+    python3 \
+    python3-venv \
     curl \
+    ca-certificates \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m venv /opt/yt-dlp && \
+    /opt/yt-dlp/bin/pip install --no-cache-dir "yt-dlp[default]" && \
+    curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/opt/deno sh
+
+ENV PATH="/opt/yt-dlp/bin:/opt/deno/bin:${PATH}"
 
 # Create a shared group for file access between services
 # Both telegram-api and telegram-audio-bot will use this group
@@ -43,6 +53,8 @@ RUN mkdir -p /app/temp /shared && \
     chown -R appuser:tg-shared /app && \
     chmod 770 /app/temp && \
     chmod 770 /shared
+
+RUN yt-dlp --version && deno --version && ffmpeg -version
 
 # Set umask so new files have proper permissions (rw-rw----)
 # This ensures files created by this app are readable/writable by group
