@@ -19,6 +19,11 @@ public interface ITelegramBotService
     Task<Message?> SendMessageAsync(long chatId, string text, CancellationToken cancellationToken = default, long? userId = null);
 
     /// <summary>
+    /// Updates an existing text message
+    /// </summary>
+    Task EditMessageTextAsync(long chatId, int messageId, string text, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Gets the current bot info
     /// </summary>
     Task<User?> GetMeAsync();
@@ -64,6 +69,18 @@ public class TelegramBotService(
         {
             _logger.LogError(ex, "Error sending message to chat {ChatId}", chatId);
             return null;
+        }
+    }
+
+    public async Task EditMessageTextAsync(long chatId, int messageId, string text, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _botClient.EditMessageText(chatId, messageId, text, cancellationToken: cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error editing message {MessageId} in chat {ChatId}", messageId, chatId);
         }
     }
 

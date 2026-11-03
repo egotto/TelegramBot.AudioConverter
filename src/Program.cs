@@ -31,6 +31,8 @@ builder.Services.AddSingleton<ITelegramBotClient>(_ => new TelegramBotClient(
 // Register application services
 builder.Services.AddScoped<IUpdateProcessor, UpdateProcessor>();
 builder.Services.AddScoped<IAudioExtractionService, AudioExtractionService>();
+builder.Services.Configure<YtDlpOptions>(builder.Configuration.GetSection("YtDlp"));
+builder.Services.AddSingleton<IYtDlpService, YtDlpService>();
 builder.Services.AddScoped<ITelegramBotService, TelegramBotService>();
 builder.Services.AddScoped<IBotCommandService, BotCommandService>();
 var databaseConnectionString = builder.Configuration.GetConnectionString("DefaultConnection");

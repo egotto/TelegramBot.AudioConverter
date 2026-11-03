@@ -1,6 +1,7 @@
 using Telegram.Bot;
 using Telegram.Bot.Types;
 using TelegramAudioBot.Models;
+using System.Text.RegularExpressions;
 
 namespace TelegramAudioBot.Services;
 
@@ -18,6 +19,7 @@ public interface IUpdateProcessor
 public class UpdateProcessor(
     ITelegramBotClient _botClient,
     IAudioExtractionService _audioService,
+    IYtDlpService _ytDlpService,
     ITelegramBotService _telegramService,
     ILogger<UpdateProcessor> _logger,
     IUserDataService _userDataService,
@@ -75,23 +77,193 @@ public class UpdateProcessor(
                 return;
             }
 
-            // Handle video files
-            if (message.Video is not { } video)
+            if (message.Video is { } video)
             {
-                await _telegramService.SendMessageAsync(
-                    message.Chat.Id,
-                    "❌ Please send a video file or enter /help command for help.",
-                    cancellationToken,
-                    userId);
+                await ProcessVideoAsync(message, video, userId, cancellationToken);
                 return;
             }
 
-            await ProcessVideoAsync(message, video, userId, cancellationToken);
+            var url = ExtractUrl(message.Text) ?? ExtractUrl(message.Caption);
+            if (url is not null)
+            {
+                await ProcessUrlAsync(message, url, userId, cancellationToken);
+                return;
+            }
+
+            await _telegramService.SendMessageAsync(
+                message.Chat.Id,
+                "❌ Please send a video file or a supported media link, or enter /help for help.",
+                cancellationToken,
+                userId);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing update");
         }
+    }
+
+    private async Task ProcessUrlAsync(Message message, string url, long userId, CancellationToken cancellationToken)
+    {
+        var chatId = message.Chat.Id;
+        var downloadDirectory = Path.Combine(_tempFilesPath, $"download_{Guid.NewGuid():N}");
+        Message? progressMessage = null;
+        try
+        {
+            Directory.CreateDirectory(_tempFilesPath);
+            progressMessage = await _telegramService.SendMessageAsync(
+                chatId,
+                "⏳ Downloading audio...",
+                cancellationToken,
+                userId);
+
+            var result = await _ytDlpService.DownloadAudioAsync(
+                url,
+                downloadDirectory,
+                _maxFileSizeMb,
+                async (progress, token) =>
+                {
+                    if (progressMessage is null)
+                        return;
+
+                    var status = $"⏳ Downloading audio: {progress.Percent:0}%";
+                    if (!string.IsNullOrWhiteSpace(progress.Speed))
+                        status += $"\nSpeed: {progress.Speed}";
+                    if (!string.IsNullOrWhiteSpace(progress.Eta))
+                        status += $" | ETA: {progress.Eta}";
+
+                    await _telegramService.EditMessageTextAsync(
+                        chatId,
+                        progressMessage.MessageId,
+                        status,
+                        token);
+                },
+                cancellationToken);
+
+            if (result.Files.Count == 0)
+            {
+                CleanupDirectory(downloadDirectory, recursive: true);
+                var errorMessage = $"❌ Could not process this link. {result.Error ?? "yt-dlp could not download any audio."}";
+                if (progressMessage is not null)
+                    await _telegramService.EditMessageTextAsync(chatId, progressMessage.MessageId, errorMessage, cancellationToken);
+                else
+                    await _telegramService.SendMessageAsync(chatId, errorMessage, cancellationToken, userId);
+                return;
+            }
+
+            var settings = await _userDataService.GetOrCreateSettingsAsync(userId, cancellationToken);
+            var errors = result.Errors.ToList();
+            var sentCount = 0;
+
+            foreach (var downloadedPath in result.Files)
+            {
+                var outputPath = downloadedPath;
+                var keepOutput = false;
+                try
+                {
+                    var mediaInfo = await _audioService.GetMediaInfoAsync(downloadedPath);
+                    if (!MatchesSettings(downloadedPath, mediaInfo, settings))
+                    {
+                        outputPath = Path.Combine(_tempFilesPath, $"audio_{Guid.NewGuid():N}{settings.FileExtension}");
+                        if (!await _audioService.ExtractAudioAsync(downloadedPath, outputPath, settings, cancellationToken))
+                        {
+                            errors.Add($"{Path.GetFileName(downloadedPath)}: audio conversion failed.");
+                            continue;
+                        }
+                    }
+
+                    await using var audioStream = File.OpenRead(outputPath);
+                    var sentMessage = await _telegramService.SendAudioAsync(
+                        chatId,
+                        audioStream,
+                        $"{Path.GetFileNameWithoutExtension(downloadedPath)}{settings.FileExtension}",
+                        cancellationToken,
+                        userId);
+
+                    if (sentMessage is null)
+                    {
+                        errors.Add($"{Path.GetFileName(downloadedPath)}: Telegram could not send the audio file.");
+                        continue;
+                    }
+
+                    keepOutput = true;
+                    sentCount++;
+                    await _userDataService.RecordEventAsync(
+                        userId,
+                        "AudioUploaded",
+                        Path.GetFileName(outputPath),
+                        Path.GetRelativePath(_tempFilesPath, outputPath),
+                        cancellationToken);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    _logger.LogError(exception, "Failed to process downloaded audio {FilePath}", downloadedPath);
+                    errors.Add($"{Path.GetFileName(downloadedPath)}: processing failed.");
+                }
+                finally
+                {
+                    if (!keepOutput)
+                        CleanupFiles(outputPath);
+                    if (!string.Equals(outputPath, downloadedPath, StringComparison.Ordinal))
+                        CleanupFiles(downloadedPath);
+                }
+            }
+
+            CleanupDirectory(downloadDirectory);
+            var summary = sentCount > 0
+                ? $"✅ Sent audio files: {sentCount}."
+                : "❌ No audio files could be sent.";
+            if (errors.Count > 0)
+            {
+                summary += "\n\nSkipped items or errors:\n" +
+                           string.Join("\n", errors.Take(8).Select(error => $"• {error}"));
+                if (errors.Count > 8)
+                    summary += $"\n• And {errors.Count - 8} more.";
+            }
+
+            await _telegramService.SendMessageAsync(chatId, summary, cancellationToken, userId);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Error processing media link for chat {ChatId}", chatId);
+            const string errorMessage = "❌ An error occurred while processing this link. Please try again later.";
+            if (progressMessage is not null)
+                await _telegramService.EditMessageTextAsync(chatId, progressMessage.MessageId, errorMessage, cancellationToken);
+            else
+                await _telegramService.SendMessageAsync(chatId, errorMessage, cancellationToken, userId);
+        }
+    }
+
+    private static string? ExtractUrl(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+
+        var match = Regex.Match(text, @"https?://[^\s<>]+", RegexOptions.IgnoreCase);
+        if (!match.Success)
+            return null;
+
+        var url = match.Value.TrimEnd('.', ',', '!', '?', ')', ']', '}', '"', '\'');
+        return Uri.TryCreate(url, UriKind.Absolute, out var uri) &&
+               (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
+            ? url
+            : null;
+    }
+
+    private static bool MatchesSettings(string filePath, MediaInfo? mediaInfo, UserSettings settings)
+    {
+        var expectedCodec = settings.AudioCodec.Equals("aac", StringComparison.OrdinalIgnoreCase) ? "aac" : "mp3";
+        var expectedBitrate = settings.AudioBitrateKbps * 1000;
+        var bitrateTolerance = Math.Max(2000, expectedBitrate / 20);
+
+        return mediaInfo is not null &&
+               string.Equals(mediaInfo.AudioCodec, expectedCodec, StringComparison.OrdinalIgnoreCase) &&
+               Math.Abs((mediaInfo.AudioBitrate ?? 0) - expectedBitrate) <= bitrateTolerance &&
+               mediaInfo.SampleRate == settings.AudioSampleRateHz &&
+               string.Equals(Path.GetExtension(filePath), settings.FileExtension, StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task ProcessVideoAsync(Message message, Video video, long userId, CancellationToken cancellationToken)
@@ -188,11 +360,11 @@ public class UpdateProcessor(
     private async Task HandleStartCommand(long chatId, long userId, CancellationToken cancellationToken)
     {
         var message = "👋 **Welcome to Audio Bot!**\n\n" +
-            "I will help you extract audio from video in just a few seconds.\n\n" +
+            "I will extract audio from videos and supported media links.\n\n" +
             "**How to use:**\n" +
-            "1. Send me a video file (MP4, WebM, MOV, etc.)\n" +
-            "2. I will convert it to audio in your selected format\n" +
-            "3. You will get the ready audio\n\n" +
+            "1. Send a video file or a supported media link\n" +
+            "2. For playlists, I will send each available audio track\n" +
+            "3. I will use your selected audio settings\n\n" +
             $"Use {CommandConstants.Help} for the list of commands.";
 
         await _telegramService.SendMessageAsync(chatId, message, cancellationToken, userId);
@@ -206,10 +378,7 @@ public class UpdateProcessor(
             $"{CommandConstants.Settings} - Audio parameters\n" +
             $"{CommandConstants.Cancel} - Cancel processing\n\n" +
             "**How the bot works:**\n" +
-            "Just send a video file, and the bot will automatically:\n" +
-            "✅ Upload the video\n" +
-            "✅ Extract audio (AAC, 128 kbps, 44.1 kHz)\n" +
-            "✅ Send you the ready file\n\n" +
+            "Send a video file or a supported media link. Playlist tracks are processed independently, and any skipped items or errors are reported.\n\n" +
             "**Supported formats:**\n" +
             "MP4, WebM, MOV, AVI, FLV, MKV, etc.";
 
@@ -279,6 +448,19 @@ public class UpdateProcessor(
             {
                 _logger.LogWarning(ex, "Error deleting file {FilePath}", path);
             }
+        }
+    }
+
+    private void CleanupDirectory(string directoryPath, bool recursive = false)
+    {
+        try
+        {
+            if (Directory.Exists(directoryPath) && (recursive || !Directory.EnumerateFileSystemEntries(directoryPath).Any()))
+                Directory.Delete(directoryPath, recursive);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error deleting directory {DirectoryPath}", directoryPath);
         }
     }
 
