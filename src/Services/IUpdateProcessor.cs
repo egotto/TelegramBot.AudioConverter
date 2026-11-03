@@ -125,7 +125,9 @@ public class UpdateProcessor(
                     if (progressMessage is null)
                         return;
 
-                    var status = $"⏳ Downloading audio: {progress.Percent:0}%";
+                    var status = progress.PlaylistIndex.HasValue && progress.PlaylistCount.HasValue
+                        ? $"⏳ Downloading track {progress.PlaylistIndex}/{progress.PlaylistCount}: {progress.Percent:0}%"
+                        : $"⏳ Downloading audio: {progress.Percent:0}%";
                     if (!string.IsNullOrWhiteSpace(progress.Speed))
                         status += $"\nSpeed: {progress.Speed}";
                     if (!string.IsNullOrWhiteSpace(progress.Eta))
@@ -301,6 +303,9 @@ public class UpdateProcessor(
 
             var sourceFilePath = await DownloadFileAsync(video.FileId, cancellationToken);
             videoFilePath = await CopyToManagedStorageAsync(sourceFilePath, "video", Path.GetExtension(sourceFilePath), cancellationToken);
+            var sourceFileName = !string.IsNullOrWhiteSpace(video.FileName)
+                ? video.FileName
+                : Path.GetFileName(sourceFilePath);
             await _userDataService.RecordEventAsync(
                 userId,
                 "VideoDownloaded",
@@ -329,7 +334,7 @@ public class UpdateProcessor(
             var sentMessage = await _telegramService.SendAudioAsync(
                 chatId,
                 memoryStream,
-                $"audio_{message.MessageId}{settings.FileExtension}",
+                BuildAudioFileName(sourceFileName, settings.FileExtension),
                 cancellationToken,
                 userId);
 
@@ -361,6 +366,7 @@ public class UpdateProcessor(
     {
         var message = "👋 **Welcome to Audio Bot!**\n\n" +
             "I will extract audio from videos and supported media links.\n\n" +
+            "⚠️ This project is for educational purposes only, to explore Telegram bots with .NET. Only download content you have permission to download, and follow the platform's terms and the laws in your country.\n\n" +
             "**How to use:**\n" +
             "1. Send a video file or a supported media link\n" +
             "2. For playlists, I will send each available audio track\n" +
@@ -377,6 +383,7 @@ public class UpdateProcessor(
             $"{CommandConstants.Help} - Show this help\n" +
             $"{CommandConstants.Settings} - Audio parameters\n" +
             $"{CommandConstants.Cancel} - Cancel processing\n\n" +
+            "⚠️ This project is for educational purposes only, to explore Telegram bots with .NET. Only download content you have permission to download, and follow the platform's terms and the laws in your country.\n\n" +
             "**How the bot works:**\n" +
             "Send a video file or a supported media link. Playlist tracks are processed independently, and any skipped items or errors are reported.\n\n" +
             "**Supported formats:**\n" +
@@ -449,6 +456,23 @@ public class UpdateProcessor(
                 _logger.LogWarning(ex, "Error deleting file {FilePath}", path);
             }
         }
+    }
+
+    private static string BuildAudioFileName(string sourceFileName, string extension)
+    {
+        var normalizedFileName = sourceFileName.Replace('\\', '/');
+        var name = Path.GetFileNameWithoutExtension(normalizedFileName);
+        var invalidCharacters = Path.GetInvalidFileNameChars().Concat("<>:\"/\\|?*".ToCharArray()).ToHashSet();
+        var safeName = new string(name.Select(character => char.IsControl(character) || invalidCharacters.Contains(character) ? '_' : character).ToArray())
+            .Trim()
+            .Trim('.');
+
+        if (safeName.Length == 0)
+            safeName = "audio";
+        if (safeName.Length > 150)
+            safeName = safeName[..150].TrimEnd();
+
+        return $"{safeName}{extension}";
     }
 
     private void CleanupDirectory(string directoryPath, bool recursive = false)

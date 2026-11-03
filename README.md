@@ -2,7 +2,9 @@
 
 # Telegram Audio Bot
 
-A bot for extracting audio from video files sent via Telegram.
+A Telegram bot for extracting audio from video files and supported media links. The project is intended solely for educational purposes and for exploring Telegram bot development with .NET.
+
+**Responsible use:** Only download content you have the right to download. Do not use this project in a way that violates the source platform's terms of service or the laws applicable in your country.
 
 ## Features
 
@@ -40,6 +42,7 @@ Send a video file, a supported media link, or a playlist link. Available playlis
 
 - .NET 10.0+
 - FFmpeg, yt-dlp with its default dependencies, and Deno
+- [yt-dlp source code on GitHub](https://github.com/yt-dlp/yt-dlp)
 - Telegram Bot Token (from @BotFather)
 - **Local Telegram API** (for files > 20 MB) - API ID and Hash from [my.telegram.org](https://my.telegram.org)
 - Docker & Docker Compose (for containerized setup)
