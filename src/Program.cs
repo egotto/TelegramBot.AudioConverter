@@ -30,6 +30,7 @@ builder.Services.AddSingleton<ITelegramBotClient>(_ => new TelegramBotClient(
 
 // Register application services
 builder.Services.AddScoped<IUpdateProcessor, UpdateProcessor>();
+builder.Services.AddSingleton<IActiveProcessingRegistry, ActiveProcessingRegistry>();
 builder.Services.AddScoped<IAudioExtractionService, AudioExtractionService>();
 builder.Services.Configure<YtDlpOptions>(builder.Configuration.GetSection("YtDlp"));
 builder.Services.AddSingleton<IYtDlpService, YtDlpService>();

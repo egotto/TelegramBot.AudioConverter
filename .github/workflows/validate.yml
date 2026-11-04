@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'src/**'
+      - 'tests/**'
       - '.github/workflows/validate.yml'
   workflow_dispatch:
 
@@ -28,6 +29,9 @@ jobs:
 
       - name: Build .NET solution
         run: dotnet build src/TelegramAudioBot.sln --configuration Release --no-restore
+
+      - name: Run unit tests
+        run: dotnet test src/TelegramAudioBot.sln --configuration Release --no-build --no-restore
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
