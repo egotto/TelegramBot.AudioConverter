@@ -40,12 +40,22 @@ public class AudioExtractionService(ILogger<AudioExtractionService> _logger) : I
 
                 process.Start();
 
-                var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-                var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+                var outputTask = process.StandardOutput.ReadToEndAsync();
+                var errorTask = process.StandardError.ReadToEndAsync();
 
-                await Task.WhenAll(outputTask, errorTask);
-
-                await process.WaitForExitAsync(cancellationToken);
+                try
+                {
+                    await process.WaitForExitAsync(cancellationToken);
+                    await Task.WhenAll(outputTask, errorTask);
+                }
+                catch (OperationCanceledException)
+                {
+                    if (!process.HasExited)
+                        process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync(CancellationToken.None);
+                    await Task.WhenAll(outputTask, errorTask);
+                    throw;
+                }
 
                 if (process.ExitCode != 0)
                 {
@@ -56,6 +66,10 @@ public class AudioExtractionService(ILogger<AudioExtractionService> _logger) : I
 
             _logger.LogInformation("Audio extraction completed successfully");
             return true;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {

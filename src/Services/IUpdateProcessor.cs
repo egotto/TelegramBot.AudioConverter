@@ -21,6 +21,7 @@ public class UpdateProcessor(
     IAudioExtractionService _audioService,
     IYtDlpService _ytDlpService,
     ITelegramBotService _telegramService,
+    IActiveProcessingRegistry _activeProcessingRegistry,
     ILogger<UpdateProcessor> _logger,
     IUserDataService _userDataService,
     IConfiguration configuration) : IUpdateProcessor
@@ -51,7 +52,7 @@ public class UpdateProcessor(
             _logger.LogInformation("Received message from {UserId} in chat {ChatId}", userId, message.Chat.Id);
 
             // Handle commands
-            var commandText = message.Text?.Trim().Split(' ')[0].ToLower();
+            var commandText = message.Text?.Trim().Split(' ')[0].Split('@')[0].ToLowerInvariant();
 
             if (commandText == CommandConstants.Start)
             {
@@ -79,14 +80,22 @@ public class UpdateProcessor(
 
             if (message.Video is { } video)
             {
-                await ProcessVideoAsync(message, video, userId, cancellationToken);
+                await RunMediaJobAsync(
+                    message,
+                    userId,
+                    cancellationToken,
+                    jobToken => ProcessVideoAsync(message, video, userId, jobToken));
                 return;
             }
 
             var url = ExtractUrl(message.Text) ?? ExtractUrl(message.Caption);
             if (url is not null)
             {
-                await ProcessUrlAsync(message, url, userId, cancellationToken);
+                await RunMediaJobAsync(
+                    message,
+                    userId,
+                    cancellationToken,
+                    jobToken => ProcessUrlAsync(message, url, userId, jobToken));
                 return;
             }
 
@@ -99,6 +108,36 @@ public class UpdateProcessor(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing update");
+        }
+    }
+
+    private async Task RunMediaJobAsync(
+        Message message,
+        long userId,
+        CancellationToken hostToken,
+        Func<CancellationToken, Task> processJob)
+    {
+        if (!_activeProcessingRegistry.TryStart(message.Chat.Id, userId, hostToken, out var jobCancellation))
+        {
+            await _telegramService.SendMessageAsync(
+                message.Chat.Id,
+                "⚠️ You already have a processing task. Use /cancel before starting another one.",
+                hostToken,
+                userId);
+            return;
+        }
+
+        try
+        {
+            await processJob(jobCancellation.Token);
+        }
+        catch (OperationCanceledException) when (jobCancellation.IsCancellationRequested)
+        {
+            _logger.LogInformation("Media task cancelled for user {UserId} in chat {ChatId}", userId, message.Chat.Id);
+        }
+        finally
+        {
+            _activeProcessingRegistry.Complete(message.Chat.Id, userId, jobCancellation);
         }
     }
 
@@ -226,6 +265,9 @@ public class UpdateProcessor(
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            CleanupDirectory(downloadDirectory, recursive: true);
+            if (progressMessage is not null)
+                await _telegramService.EditMessageTextAsync(chatId, progressMessage.MessageId, "⏹️ Download cancelled.", CancellationToken.None);
             throw;
         }
         catch (Exception exception)
@@ -350,6 +392,10 @@ public class UpdateProcessor(
                 await _telegramService.SendMessageAsync(chatId, "✅ Audio sent successfully!", cancellationToken, userId);
             }
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing video");
@@ -406,7 +452,9 @@ public class UpdateProcessor(
 
     private async Task HandleCancelCommand(long chatId, long userId, CancellationToken cancellationToken)
     {
-        var message = "⏹️ Cancel current processing command.";
+        var message = _activeProcessingRegistry.Cancel(chatId, userId)
+            ? "⏹️ Cancellation requested. The current task is stopping."
+            : "ℹ️ There is no active task to cancel.";
         await _telegramService.SendMessageAsync(chatId, message, cancellationToken, userId);
     }
 
