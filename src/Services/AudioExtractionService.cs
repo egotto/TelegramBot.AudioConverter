@@ -8,7 +8,7 @@ public class AudioExtractionService(ILogger<AudioExtractionService> _logger) : I
     {
         try
         {
-            TelegramAudioBot.Models.AudioSettingsValidator.Validate(settings.AudioCodec, settings.AudioBitrateKbps, settings.AudioSampleRateHz);
+            TelegramAudioBot.Models.AudioSettingsValidator.Validate(settings.AudioFormat, settings.AudioCodec, settings.AudioBitrateKbps, settings.AudioSampleRateHz);
 
             if (!File.Exists(inputPath))
             {
@@ -22,21 +22,26 @@ public class AudioExtractionService(ILogger<AudioExtractionService> _logger) : I
             if (File.Exists(outputPath))
                 File.Delete(outputPath);
 
-            // Extract audio using FFMpeg command line
-            // ffmpeg -i input.mp4 -q:a 0 -map a output.mp3
-            var arguments = $"-i \"{inputPath}\" -vn -acodec {settings.AudioCodec} -ab {settings.AudioBitrateKbps}k -ar {settings.AudioSampleRateHz} \"{outputPath}\"";
-
             using (var process = new System.Diagnostics.Process())
             {
                 process.StartInfo = new System.Diagnostics.ProcessStartInfo
                 {
                     FileName = "ffmpeg",
-                    Arguments = arguments,
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     CreateNoWindow = true
                 };
+                foreach (var argument in new[]
+                {
+                    "-i", inputPath,
+                    "-vn",
+                    "-c:a", settings.AudioCodec,
+                    "-b:a", $"{settings.AudioBitrateKbps}k",
+                    "-ar", settings.AudioSampleRateHz.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    outputPath
+                })
+                    process.StartInfo.ArgumentList.Add(argument);
 
                 process.Start();
 

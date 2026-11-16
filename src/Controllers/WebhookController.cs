@@ -19,10 +19,12 @@ public class WebhookController(
     {
         try
         {
-            if (update.Message is not { } message)
+            if (update.Message is not { } message && update.CallbackQuery is null)
                 return Ok();
 
-            _logger.LogInformation("Received webhook update from {UserId}", message.From?.Id);
+            _logger.LogInformation(
+                "Received webhook update from {UserId}",
+                update.Message?.From?.Id ?? update.CallbackQuery?.From.Id);
 
             // Process the update
             await _updateProcessor.ProcessUpdateAsync(update, cancellationToken);

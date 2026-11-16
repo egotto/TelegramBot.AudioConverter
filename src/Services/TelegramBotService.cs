@@ -1,5 +1,6 @@
 using Telegram.Bot;
 using Telegram.Bot.Types;
+using Telegram.Bot.Types.ReplyMarkups;
 
 namespace TelegramAudioBot.Services;
 
@@ -16,12 +17,12 @@ public interface ITelegramBotService
     /// <summary>
     /// Sends a text message to a Telegram user
     /// </summary>
-    Task<Message?> SendMessageAsync(long chatId, string text, CancellationToken cancellationToken = default, long? userId = null);
+    Task<Message?> SendMessageAsync(long chatId, string text, CancellationToken cancellationToken = default, long? userId = null, InlineKeyboardMarkup? replyMarkup = null);
 
     /// <summary>
     /// Updates an existing text message
     /// </summary>
-    Task EditMessageTextAsync(long chatId, int messageId, string text, CancellationToken cancellationToken = default);
+    Task EditMessageTextAsync(long chatId, int messageId, string text, CancellationToken cancellationToken = default, InlineKeyboardMarkup? replyMarkup = null);
 
     /// <summary>
     /// Gets the current bot info
@@ -50,11 +51,11 @@ public class TelegramBotService(
         }
     }
 
-    public async Task<Message?> SendMessageAsync(long chatId, string text, CancellationToken cancellationToken = default, long? userId = null)
+    public async Task<Message?> SendMessageAsync(long chatId, string text, CancellationToken cancellationToken = default, long? userId = null, InlineKeyboardMarkup? replyMarkup = null)
     {
         try
         {
-            var message = await _botClient.SendMessage(chatId, text, cancellationToken: cancellationToken);
+            var message = await _botClient.SendMessage(chatId, text, replyMarkup: replyMarkup, cancellationToken: cancellationToken);
             if (userId.HasValue)
             {
                 await _userDataService.RecordEventAsync(
@@ -72,11 +73,11 @@ public class TelegramBotService(
         }
     }
 
-    public async Task EditMessageTextAsync(long chatId, int messageId, string text, CancellationToken cancellationToken = default)
+    public async Task EditMessageTextAsync(long chatId, int messageId, string text, CancellationToken cancellationToken = default, InlineKeyboardMarkup? replyMarkup = null)
     {
         try
         {
-            await _botClient.EditMessageText(chatId, messageId, text, cancellationToken: cancellationToken);
+            await _botClient.EditMessageText(chatId, messageId, text, replyMarkup: replyMarkup, cancellationToken: cancellationToken);
         }
         catch (Exception ex)
         {
