@@ -18,6 +18,8 @@ public class AudioFormats : Migration
             defaultValue: "mp3");
 
         migrationBuilder.Sql("""
+            ALTER TABLE "UserSettings" DROP CONSTRAINT IF EXISTS "CK_UserSettings_AudioOptions";
+
             UPDATE "UserSettings"
             SET "AudioFormat" = CASE WHEN "AudioCodec" = 'aac' THEN 'm4a' ELSE 'mp3' END,
                 "AudioCodec" = CASE WHEN "AudioCodec" = 'aac' THEN 'aac' ELSE 'libmp3lame' END,
@@ -27,7 +29,6 @@ public class AudioFormats : Migration
                     ELSE 128
                 END;
 
-            ALTER TABLE "UserSettings" DROP CONSTRAINT IF EXISTS "CK_UserSettings_AudioOptions";
             ALTER TABLE "UserSettings" ADD CONSTRAINT "CK_UserSettings_AudioOptions" CHECK (
                 ("AudioFormat" = 'mp3' AND "AudioCodec" = 'libmp3lame' AND "AudioBitrateKbps" IN (64, 96, 128, 160, 192, 224, 256, 320)) OR
                 ("AudioFormat" = 'm4a' AND "AudioCodec" = 'aac' AND "AudioBitrateKbps" IN (64, 96, 128, 160, 192, 224, 256, 320, 384, 512)));
