@@ -1,5 +1,6 @@
 using Telegram.Bot;
 using Telegram.Bot.Types;
+using Telegram.Bot.Types.ReplyMarkups;
 using TelegramAudioBot.Models;
 using System.Text.RegularExpressions;
 
@@ -35,6 +36,12 @@ public class UpdateProcessor(
     {
         try
         {
+            if (update.CallbackQuery is { } callbackQuery)
+            {
+                await HandleSettingsCallbackAsync(callbackQuery, cancellationToken);
+                return;
+            }
+
             if (update.Message is not { } message)
                 return;
 
@@ -299,7 +306,7 @@ public class UpdateProcessor(
 
     private static bool MatchesSettings(string filePath, MediaInfo? mediaInfo, UserSettings settings)
     {
-        var expectedCodec = settings.AudioCodec.Equals("aac", StringComparison.OrdinalIgnoreCase) ? "aac" : "mp3";
+        var expectedCodec = settings.AudioFormat.Equals("m4a", StringComparison.OrdinalIgnoreCase) ? "aac" : "mp3";
         var expectedBitrate = settings.AudioBitrateKbps * 1000;
         var bitrateTolerance = Math.Max(2000, expectedBitrate / 20);
 
@@ -441,13 +448,91 @@ public class UpdateProcessor(
     private async Task HandleSettingsCommand(long chatId, long userId, CancellationToken cancellationToken)
     {
         var settings = await _userDataService.GetOrCreateSettingsAsync(userId, cancellationToken);
-        var settingsMessage = "⚙️ **Current audio parameters:**\n\n" +
-            $"🔊 Codec: {settings.AudioCodec.ToUpperInvariant()}\n" +
-            $"📊 Bitrate: {settings.AudioBitrateKbps} kbps\n" +
-            $"🎵 Frequency: {settings.AudioSampleRateHz / 1000.0:F1} kHz\n\n" +
-            "💡 *These parameters are optimal for most applications and provide a good balance between quality and file size.*";
+        await _telegramService.SendMessageAsync(
+            chatId,
+            BuildSettingsMessage(settings),
+            cancellationToken,
+            userId,
+            BuildSettingsKeyboard(settings));
+    }
 
-        await _telegramService.SendMessageAsync(chatId, settingsMessage, cancellationToken, userId);
+    private async Task HandleSettingsCallbackAsync(CallbackQuery callbackQuery, CancellationToken cancellationToken)
+    {
+        var callbackData = callbackQuery.Data?.Split(':');
+        if (callbackQuery.Message is not { } message ||
+            callbackData is not { Length: 3 } ||
+            callbackData[0] != "settings")
+        {
+            await _botClient.AnswerCallbackQuery(callbackQuery.Id, "This settings menu has expired.", cancellationToken: cancellationToken);
+            return;
+        }
+
+        var settings = await _userDataService.GetOrCreateSettingsAsync(callbackQuery.From.Id, cancellationToken);
+        try
+        {
+            if (callbackData[1] == "format")
+            {
+                var format = callbackData[2];
+                var bitrate = AudioSettingsValidator.GetSupportedBitrates(format).Contains(settings.AudioBitrateKbps)
+                    ? settings.AudioBitrateKbps
+                    : 128;
+                settings = await _userDataService.UpdateSettingsAsync(
+                    callbackQuery.From.Id,
+                    format,
+                    bitrate,
+                    settings.AudioSampleRateHz,
+                    cancellationToken);
+            }
+            else if (callbackData[1] == "bitrate" && int.TryParse(callbackData[2], out var bitrate))
+            {
+                settings = await _userDataService.UpdateSettingsAsync(
+                    callbackQuery.From.Id,
+                    settings.AudioFormat,
+                    bitrate,
+                    settings.AudioSampleRateHz,
+                    cancellationToken);
+            }
+            else
+            {
+                throw new ArgumentException("Unknown settings option.");
+            }
+
+            await _telegramService.EditMessageTextAsync(
+                message.Chat.Id,
+                message.MessageId,
+                BuildSettingsMessage(settings),
+                cancellationToken,
+                BuildSettingsKeyboard(settings));
+            await _botClient.AnswerCallbackQuery(callbackQuery.Id, "Settings saved.", cancellationToken: cancellationToken);
+        }
+        catch (ArgumentException)
+        {
+            await _botClient.AnswerCallbackQuery(callbackQuery.Id, "That option is not available for this format.", cancellationToken: cancellationToken);
+        }
+    }
+
+    private static string BuildSettingsMessage(UserSettings settings) =>
+        "Audio settings\n\n" +
+        $"Format: {settings.AudioFormat.ToUpperInvariant()}\n" +
+        $"Codec: {settings.AudioCodec}\n" +
+        $"Bitrate: {settings.AudioBitrateKbps} kbps\n" +
+        $"Sample rate: {settings.AudioSampleRateHz / 1000.0:F1} kHz";
+
+    private static InlineKeyboardMarkup BuildSettingsKeyboard(UserSettings settings)
+    {
+        var formatButtons = new[] { "mp3", "m4a" }
+            .Select(format => InlineKeyboardButton.WithCallbackData(
+                $"{(settings.AudioFormat == format ? "✓ " : string.Empty)}{format.ToUpperInvariant()} / {AudioSettingsValidator.GetCodec(format)}",
+                $"settings:format:{format}"))
+            .ToArray();
+        var bitrateButtons = AudioSettingsValidator.GetSupportedBitrates(settings.AudioFormat)
+            .Select(bitrate => InlineKeyboardButton.WithCallbackData(
+                $"{(settings.AudioBitrateKbps == bitrate ? "✓ " : string.Empty)}{bitrate} kbps",
+                $"settings:bitrate:{bitrate}"))
+            .Chunk(3)
+            .Select(row => row.ToArray());
+
+        return new InlineKeyboardMarkup(new[] { formatButtons }.Concat(bitrateButtons));
     }
 
     private async Task HandleCancelCommand(long chatId, long userId, CancellationToken cancellationToken)

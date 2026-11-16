@@ -18,8 +18,8 @@ public class TelegramAudioBotDbContext(DbContextOptions<TelegramAudioBotDbContex
         modelBuilder.Entity<UserSettings>()
             .ToTable(table => table.HasCheckConstraint(
                 "CK_UserSettings_AudioOptions",
-                "(\"AudioCodec\" = 'mp3' AND \"AudioBitrateKbps\" BETWEEN 32 AND 320) OR " +
-                "(\"AudioCodec\" = 'aac' AND \"AudioBitrateKbps\" BETWEEN 16 AND 512)"));
+                "(\"AudioFormat\" = 'mp3' AND \"AudioCodec\" = 'libmp3lame' AND \"AudioBitrateKbps\" IN (64, 96, 128, 160, 192, 224, 256, 320)) OR " +
+                "(\"AudioFormat\" = 'm4a' AND \"AudioCodec\" = 'aac' AND \"AudioBitrateKbps\" IN (64, 96, 128, 160, 192, 224, 256, 320, 384, 512))"));
         modelBuilder.Entity<UserSettings>()
             .ToTable(table => table.HasCheckConstraint(
                 "CK_UserSettings_AudioSampleRateHz",
@@ -33,7 +33,7 @@ public class TelegramAudioBotDbContext(DbContextOptions<TelegramAudioBotDbContex
 public interface IUserDataService
 {
     Task<UserSettings> GetOrCreateSettingsAsync(long telegramUserId, CancellationToken cancellationToken = default);
-    Task<UserSettings> UpdateSettingsAsync(long telegramUserId, string audioCodec, int bitrateKbps, int sampleRateHz, CancellationToken cancellationToken = default);
+    Task<UserSettings> UpdateSettingsAsync(long telegramUserId, string audioFormat, int bitrateKbps, int sampleRateHz, CancellationToken cancellationToken = default);
     Task RecordEventAsync(long telegramUserId, string type, string? content = null, string? relativeFilePath = null, CancellationToken cancellationToken = default);
     Task<int> DeleteExpiredHistoryAsync(DateTimeOffset cutoff, CancellationToken cancellationToken = default);
 }
@@ -55,9 +55,11 @@ public class UserDataService(TelegramAudioBotDbContext dbContext) : IUserDataSer
         return settings;
     }
 
-    public async Task<UserSettings> UpdateSettingsAsync(long telegramUserId, string audioCodec, int bitrateKbps, int sampleRateHz, CancellationToken cancellationToken = default)
+    public async Task<UserSettings> UpdateSettingsAsync(long telegramUserId, string audioFormat, int bitrateKbps, int sampleRateHz, CancellationToken cancellationToken = default)
     {
-        AudioSettingsValidator.Validate(audioCodec, bitrateKbps, sampleRateHz);
+        var normalizedFormat = audioFormat.Trim().ToLowerInvariant();
+        var codec = AudioSettingsValidator.GetCodec(normalizedFormat);
+        AudioSettingsValidator.Validate(normalizedFormat, codec, bitrateKbps, sampleRateHz);
         var settings = await dbContext.UserSettings
             .SingleOrDefaultAsync(item => item.UserId == telegramUserId, cancellationToken);
 
@@ -67,7 +69,8 @@ public class UserDataService(TelegramAudioBotDbContext dbContext) : IUserDataSer
             dbContext.UserSettings.Add(settings);
         }
 
-        settings.AudioCodec = audioCodec.Trim().ToLowerInvariant();
+        settings.AudioFormat = normalizedFormat;
+        settings.AudioCodec = codec;
         settings.AudioBitrateKbps = bitrateKbps;
         settings.AudioSampleRateHz = sampleRateHz;
         settings.UpdatedAt = DateTimeOffset.UtcNow;
